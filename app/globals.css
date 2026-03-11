@@ -6,3 +6,5 @@ body { -webkit-font-smoothing: antialiased; overscroll-behavior: none; }
 ::-webkit-scrollbar-thumb { background: #e8d5c0; border-radius: 2px; }
 input[type=time]::-webkit-calendar-picker-indicator { opacity: .5; }
 textarea, input, button { font-family: inherit; }
+.no-scrollbar { scrollbar-width: none; -ms-overflow-style: none; }
+.no-scrollbar::-webkit-scrollbar { display: none; }

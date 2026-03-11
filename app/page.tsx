@@ -1,10 +1,21 @@
 'use client'
 import { useState, useEffect, useCallback } from 'react'
+import dynamic from 'next/dynamic'
 import AuthModal from '../components/AuthModal'
 import { useAuth } from '../lib/useAuth'
 import { T, type ThemeMode } from '../lib/theme'
 import { PLACES, CATS, DAYS_K, DAYS_S, DAYS_F, DOW } from '../lib/data'
 import type { Place } from '../lib/types'
+
+// MapView carregado dinamicamente (Leaflet não suporta SSR)
+const MapView = dynamic(() => import('../components/MapView'), {
+  ssr: false,
+  loading: () => (
+    <div style={{ width:'100%',height:'100%',display:'flex',alignItems:'center',justifyContent:'center',background:'#E8E0D8',fontSize:24 }}>
+      🗺️
+    </div>
+  ),
+})
 
 const goTo  = (url: string) => { try { window.open(url,'_blank','noopener') } catch(e){} }
 const mUrl  = (a: string, c: string) => `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(a+', '+c)}`
@@ -295,22 +306,107 @@ function Card({ place, isFav, onOpen, onFav, th }: { place:Place, isFav:boolean,
 }
 
 /* ─── Screens ──────────────────────────────────────────────── */
-function HomeScreen({ favs, onFav, onOpen, th, themeBtn }: { favs:Set<string>, onFav:(p:Place)=>void, onOpen:(p:Place)=>void, th:typeof T.light, themeBtn:React.ReactNode }) {
-  const [cat, setCat] = useState('all')
-  const [filter, setFilter] = useState('all')
-  const [search, setSearch] = useState('')
 
-  const list = PLACES.filter(p => {
-    if (cat!=='all' && p.type!==cat) return false
-    if (filter==='open' && !p.open) return false
-    if (filter==='closed' && p.open) return false
-    if (search && !p.name.toLowerCase().includes(search.toLowerCase())) return false
+/** Card horizontal — usado nos carrosséis de seção */
+function HCard({ place, isFav, onOpen, onFav, th }: { place:Place, isFav:boolean, onOpen:(p:Place)=>void, onFav:(p:Place)=>void, th: typeof T.light }) {
+  const p = place
+  const photo = p.photos[0]?.url
+  return (
+    <div onClick={()=>onOpen(p)} style={{ flex:'0 0 auto',width:200,borderRadius:18,overflow:'hidden',cursor:'pointer',
+      background:th.bgCard,border:`1.5px solid ${p.plan==='premium'?p.color+'50':th.border}`,
+      boxShadow:p.plan==='premium'?`0 4px 20px ${p.color}25`:th.shadow,position:'relative' }}>
+      {photo
+        ? <div style={{ position:'relative',height:110 }}>
+            <img src={photo} alt="" style={{ width:'100%',height:110,objectFit:'cover' }}/>
+            <div style={{ position:'absolute',inset:0,background:`linear-gradient(to bottom,transparent 40%,${p.color}cc)` }}/>
+            <div style={{ position:'absolute',bottom:7,left:9,fontSize:9,fontWeight:800,letterSpacing:.5,
+              color:'#fff',background:p.open?'#1B7A3E':'rgba(0,0,0,.5)',borderRadius:20,padding:'2px 8px' }}>
+              {p.open?'● ABERTO':'● FECHADO'}
+            </div>
+            <button onClick={e=>{e.stopPropagation();onFav(p)}} style={{ position:'absolute',top:7,right:7,
+              background:'rgba(0,0,0,.45)',backdropFilter:'blur(4px)',border:'none',borderRadius:'50%',
+              width:28,height:28,cursor:'pointer',fontSize:13,display:'flex',alignItems:'center',justifyContent:'center' }}>
+              {isFav?'❤️':'🤍'}
+            </button>
+          </div>
+        : <div style={{ height:80,background:`linear-gradient(135deg,${p.color}22,${p.color}44)`,
+            display:'flex',alignItems:'center',justifyContent:'center',fontSize:36,position:'relative' }}>
+            {p.emoji}
+            <button onClick={e=>{e.stopPropagation();onFav(p)}} style={{ position:'absolute',top:7,right:7,
+              background:th.bgInput,border:`1px solid ${th.border}`,borderRadius:'50%',
+              width:26,height:26,cursor:'pointer',fontSize:12,display:'flex',alignItems:'center',justifyContent:'center' }}>
+              {isFav?'❤️':'🤍'}
+            </button>
+          </div>
+      }
+      <div style={{ padding:'9px 11px 11px' }}>
+        <div style={{ fontSize:13,fontWeight:900,color:th.textPrimary,lineHeight:1.2,marginBottom:2,
+          fontFamily:"'Playfair Display',serif",whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis' }}>
+          {p.name}
+        </div>
+        <div style={{ fontSize:10,color:th.textSec,marginBottom:p.update?5:0 }}>
+          📍 {p.nbh}{p.hours&&<span style={{ color:p.open?th.green:th.textMuted }}> · {p.hours}</span>}
+        </div>
+        {p.update&&<div style={{ fontSize:10,color:th.green,fontWeight:700,lineHeight:1.3,
+          overflow:'hidden',display:'-webkit-box',WebkitLineClamp:2,WebkitBoxOrient:'vertical' as any }}>
+          📣 {p.update}
+        </div>}
+        <div style={{ display:'flex',justifyContent:'space-between',alignItems:'center',marginTop:6 }}>
+          <span style={{ fontSize:10,color:th.gold,fontWeight:800 }}>★ {p.rating.toFixed(1)}</span>
+          <span style={{ fontSize:9,color:th.accent,fontWeight:700 }}>Ver →</span>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+/** Seção com título + carrossel horizontal */
+function Section({ title, icon, places, favs, onOpen, onFav, th }: {
+  title:string, icon:string, places:Place[], favs:Set<string>,
+  onOpen:(p:Place)=>void, onFav:(p:Place)=>void, th:typeof T.light }) {
+  if (places.length===0) return null
+  return (
+    <div style={{ marginBottom:6 }}>
+      <div style={{ display:'flex',alignItems:'center',justifyContent:'space-between',padding:'0 16px',marginBottom:10 }}>
+        <div style={{ display:'flex',alignItems:'center',gap:7 }}>
+          <span style={{ fontSize:18 }}>{icon}</span>
+          <span style={{ fontSize:15,fontWeight:900,color:th.textPrimary,fontFamily:"'Playfair Display',serif" }}>{title}</span>
+          <span style={{ fontSize:11,color:th.textMuted,fontWeight:600 }}>({places.length})</span>
+        </div>
+      </div>
+      <div style={{ display:'flex',gap:12,overflowX:'auto',padding:'0 16px 2px' }} className="no-scrollbar">
+        {places.map(p=><HCard key={p.id} place={p} isFav={favs.has(p.id)} onOpen={onOpen} onFav={onFav} th={th}/>)}
+      </div>
+    </div>
+  )
+}
+
+function HomeScreen({ favs, onFav, onOpen, th, themeBtn }: { favs:Set<string>, onFav:(p:Place)=>void, onOpen:(p:Place)=>void, th:typeof T.light, themeBtn:React.ReactNode }) {
+  const [search, setSearch] = useState('')
+  const [activeCat, setActiveCat] = useState('all')
+
+  const openCount = PLACES.filter(p=>p.open).length
+  const isFiltering = search.trim() || activeCat!=='all'
+
+  // Lista filtrada (modo busca/cat)
+  const filtered = PLACES.filter(p => {
+    if (activeCat!=='all' && p.type!==activeCat) return false
+    if (search && !p.name.toLowerCase().includes(search.toLowerCase()) && !p.desc.toLowerCase().includes(search.toLowerCase())) return false
     return true
   })
-  const openCount = PLACES.filter(p=>p.open).length
+
+  // Seções para o feed
+  const destaques = PLACES.filter(p => p.plan==='premium')
+  const abertosNow = PLACES.filter(p => p.open)
+  const events = PLACES.filter(p => p.type==='event')
+  const clubs  = PLACES.filter(p => p.type==='club')
+  const bars   = PLACES.filter(p => p.type==='bar')
+  const rests  = PLACES.filter(p => p.type==='restaurant')
+  const cafes  = PLACES.filter(p => p.type==='cafe')
 
   return (
     <>
+      {/* ─── Header sticky ─── */}
       <div style={{ background:th.headerBg,borderBottom:`1.5px solid ${th.border}`,padding:'13px 16px',position:'sticky',top:0,zIndex:400,backdropFilter:'blur(12px)' }}>
         <div style={{ maxWidth:640,margin:'0 auto' }}>
           <div style={{ display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:11 }}>
@@ -320,7 +416,9 @@ function HomeScreen({ favs, onFav, onOpen, th, themeBtn }: { favs:Set<string>, o
             </div>
             <div style={{ display:'flex',gap:8,alignItems:'center' }}>
               {themeBtn}
-              <div style={{ background:th.accentBg,border:`1.5px solid ${th.accent}30`,borderRadius:20,padding:'5px 12px',color:th.accent,fontSize:12,fontWeight:700 }}>📍 Pelotas</div>
+              <div style={{ background:th.accentBg,border:`1.5px solid ${th.accent}30`,borderRadius:20,padding:'5px 12px',color:th.accent,fontSize:12,fontWeight:700 }}>
+                <span style={{ color:th.green,fontWeight:800 }}>●</span> {openCount} abertos
+              </div>
             </div>
           </div>
           <input placeholder="🔍  Buscar bares, restaurantes, eventos…" value={search} onChange={e=>setSearch(e.target.value)}
@@ -328,69 +426,224 @@ function HomeScreen({ favs, onFav, onOpen, th, themeBtn }: { favs:Set<string>, o
         </div>
       </div>
 
+      {/* ─── Chips de categoria ─── */}
       <div style={{ padding:'11px 16px 0',maxWidth:640,margin:'0 auto' }}>
-        <div style={{ display:'flex',gap:7,overflowX:'auto',paddingBottom:2 }}>
+        <div style={{ display:'flex',gap:7,overflowX:'auto',paddingBottom:2 }} className="no-scrollbar">
           {CATS.map(c => (
-            <button key={c.id} onClick={()=>setCat(c.id)} style={{ flex:'0 0 auto',background:cat===c.id?th.accent:th.bgCard,border:`1.5px solid ${cat===c.id?th.accent:th.border}`,borderRadius:20,padding:'6px 14px',color:cat===c.id?'#fff':th.textSec,fontSize:12,cursor:'pointer',fontWeight:700,whiteSpace:'nowrap',boxShadow:cat===c.id?`0 3px 12px ${th.accent}44`:th.shadow,transition:'all .15s' }}>
+            <button key={c.id} onClick={()=>setActiveCat(c.id)}
+              style={{ flex:'0 0 auto',background:activeCat===c.id?th.accent:th.bgCard,
+                border:`1.5px solid ${activeCat===c.id?th.accent:th.border}`,borderRadius:20,
+                padding:'6px 14px',color:activeCat===c.id?'#fff':th.textSec,fontSize:12,cursor:'pointer',
+                fontWeight:700,whiteSpace:'nowrap',
+                boxShadow:activeCat===c.id?`0 3px 12px ${th.accent}44`:th.shadow,transition:'all .15s' }}>
               {c.icon} {c.lbl}
             </button>
           ))}
         </div>
       </div>
 
-      <div style={{ padding:'9px 16px',maxWidth:640,margin:'0 auto',display:'flex',justifyContent:'space-between',alignItems:'center' }}>
-        <div style={{ fontSize:12,color:th.textMuted,fontWeight:600 }}>
-          <span style={{ color:th.green,fontWeight:800 }}>{openCount} abertos</span> · {list.length} locais
-        </div>
-        <div style={{ display:'flex',gap:4 }}>
-          {[['all','Todos'],['open','Abertos'],['closed','Fechados']].map(([v,l]) => (
-            <button key={v} onClick={()=>setFilter(v)} style={{ background:filter===v?th.bgInput:'transparent',border:`1.5px solid ${filter===v?th.border:'transparent'}`,borderRadius:20,padding:'3px 10px',color:filter===v?th.textPrimary:th.textMuted,fontSize:11,cursor:'pointer',fontWeight:filter===v?700:500 }}>{l}</button>
-          ))}
-        </div>
-      </div>
+      <div style={{ maxWidth:640,margin:'0 auto',paddingTop:14,paddingBottom:8 }}>
+        {isFiltering ? (
+          /* ─── Modo busca / filtro por categoria ─── */
+          <div style={{ padding:'0 16px' }}>
+            <div style={{ fontSize:12,color:th.textMuted,fontWeight:600,marginBottom:12 }}>
+              {filtered.length} resultado{filtered.length!==1?'s':''}
+              {activeCat!=='all'&&<span> em <b style={{ color:th.accent }}>{CATS.find(c=>c.id===activeCat)?.lbl}</b></span>}
+              {search&&<span> para "<b>{search}</b>"</span>}
+            </div>
+            {filtered.length===0
+              ? <div style={{ textAlign:'center',padding:60,color:th.textMuted }}><div style={{ fontSize:40,marginBottom:14 }}>🔍</div>Nenhum resultado</div>
+              : <div style={{ display:'flex',flexDirection:'column',gap:10 }}>
+                  {filtered.map(p=><Card key={p.id} place={p} isFav={favs.has(p.id)} onOpen={onOpen} onFav={onFav} th={th}/>)}
+                </div>
+            }
+          </div>
+        ) : (
+          /* ─── Feed por seções ─── */
+          <>
+            {/* Banner de destaque PREMIUM */}
+            {destaques.length>0&&(
+              <div style={{ margin:'0 16px 20px' }}>
+                <div style={{ display:'flex',alignItems:'center',gap:6,marginBottom:10 }}>
+                  <span style={{ fontSize:15,fontWeight:900,color:th.textPrimary,fontFamily:"'Playfair Display',serif" }}>✦ Em Destaque</span>
+                  <span style={{ fontSize:9,fontWeight:800,color:'#C63500',background:'#FFF0EB',borderRadius:20,padding:'2px 8px',letterSpacing:.5 }}>PREMIUM</span>
+                </div>
+                {destaques.map(p => (
+                  <div key={p.id} onClick={()=>onOpen(p)}
+                    style={{ borderRadius:20,overflow:'hidden',cursor:'pointer',marginBottom:destaques.indexOf(p)<destaques.length-1?12:0,
+                      border:`2px solid ${p.color}60`,boxShadow:`0 6px 28px ${p.color}22`,position:'relative',
+                      background:th.bgCard }}>
+                    {p.photos[0]&&(
+                      <div style={{ position:'relative',height:170 }}>
+                        <img src={p.photos[0].url} alt="" style={{ width:'100%',height:170,objectFit:'cover' }}/>
+                        <div style={{ position:'absolute',inset:0,background:`linear-gradient(to bottom,transparent 30%,rgba(0,0,0,.75))` }}/>
+                        <div style={{ position:'absolute',top:0,left:0,right:0,height:3,background:`linear-gradient(90deg,transparent,${p.color},transparent)` }}/>
+                        <div style={{ position:'absolute',bottom:14,left:14,right:14 }}>
+                          <div style={{ fontSize:11,color:'rgba(255,255,255,.8)',marginBottom:3 }}>
+                            <span style={{ background:p.open?'#1B7A3E':'rgba(0,0,0,.5)',borderRadius:20,padding:'2px 8px',fontWeight:800,fontSize:9 }}>{p.open?'● ABERTO':'● FECHADO'}</span>
+                            {p.hours&&<span style={{ marginLeft:6 }}>🕐 {p.hours}</span>}
+                          </div>
+                          <div style={{ fontSize:20,fontWeight:900,color:'#fff',fontFamily:"'Playfair Display',serif",lineHeight:1.2,textShadow:'0 2px 8px rgba(0,0,0,.6)' }}>{p.emoji} {p.name}</div>
+                          {p.update&&<div style={{ fontSize:11,color:'rgba(255,255,255,.85)',marginTop:4,lineHeight:1.4 }}>📣 {p.update.slice(0,70)}{p.update.length>70?'…':''}</div>}
+                        </div>
+                        <button onClick={e=>{e.stopPropagation();onFav(p)}} style={{ position:'absolute',top:12,right:12,background:'rgba(0,0,0,.45)',backdropFilter:'blur(4px)',border:'none',borderRadius:'50%',width:32,height:32,cursor:'pointer',fontSize:15,display:'flex',alignItems:'center',justifyContent:'center' }}>
+                          {favs.has(p.id)?'❤️':'🤍'}
+                        </button>
+                      </div>
+                    )}
+                    <div style={{ padding:'12px 14px',display:'flex',alignItems:'center',justifyContent:'space-between' }}>
+                      <div style={{ fontSize:12,color:th.textSec }}>📍 {p.addr}</div>
+                      <div style={{ fontSize:11,color:th.gold,fontWeight:800 }}>★ {p.rating.toFixed(1)} <span style={{ color:th.textMuted,fontWeight:400 }}>({p.reviews})</span></div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
 
-      <div style={{ padding:'0 16px',maxWidth:640,margin:'0 auto' }}>
-        {list.length===0
-          ? <div style={{ textAlign:'center',padding:60,color:th.textMuted }}><div style={{ fontSize:40,marginBottom:14 }}>🔍</div>Nenhum resultado</div>
-          : <div style={{ display:'flex',flexDirection:'column',gap:10 }}>{list.map(p=><Card key={p.id} place={p} isFav={favs.has(p.id)} onOpen={onOpen} onFav={onFav} th={th}/>)}</div>
-        }
+            {/* Abertos agora */}
+            {abertosNow.length>0&&(
+              <Section title="Abertos Agora" icon="⚡" places={abertosNow} favs={favs} onOpen={onOpen} onFav={onFav} th={th}/>
+            )}
+
+            {/* Festas & Eventos */}
+            <Section title="Festas & Eventos" icon="🎉" places={events} favs={favs} onOpen={onOpen} onFav={onFav} th={th}/>
+
+            {/* Baladas */}
+            <Section title="Baladas" icon="🎶" places={clubs} favs={favs} onOpen={onOpen} onFav={onFav} th={th}/>
+
+            {/* Bares */}
+            <Section title="Bares" icon="🍺" places={bars} favs={favs} onOpen={onOpen} onFav={onFav} th={th}/>
+
+            {/* Restaurantes */}
+            <Section title="Restaurantes" icon="🍽️" places={rests} favs={favs} onOpen={onOpen} onFav={onFav} th={th}/>
+
+            {/* Cafés */}
+            <Section title="Cafés" icon="☕" places={cafes} favs={favs} onOpen={onOpen} onFav={onFav} th={th}/>
+
+            {/* Todos (lista vertical completa) */}
+            <div style={{ margin:'8px 16px 0',paddingTop:16,borderTop:`1.5px solid ${th.border}` }}>
+              <div style={{ fontSize:11,color:th.textMuted,letterSpacing:2,fontWeight:700,marginBottom:12 }}>TODOS OS LOCAIS</div>
+              <div style={{ display:'flex',flexDirection:'column',gap:10 }}>
+                {PLACES.map(p=><Card key={p.id} place={p} isFav={favs.has(p.id)} onOpen={onOpen} onFav={onFav} th={th}/>)}
+              </div>
+            </div>
+          </>
+        )}
       </div>
     </>
   )
 }
 
-function MapScreen({ th }: { th: typeof T.light }) {
-  const nbhs = [...new Set(PLACES.map(p=>p.nbh))].sort()
+function MapScreen({ th, mode, onOpen }: { th: typeof T.light, mode: ThemeMode, onOpen: (p: Place) => void }) {
+  const [showList, setShowList] = useState(false)
+  const [mapSelected, setMapSelected] = useState<Place | null>(null)
+  const openCount = PLACES.filter(p => p.open).length
+
   return (
-    <div style={{ padding:'16px',maxWidth:640,margin:'0 auto' }}>
-      <div style={{ marginBottom:16 }}>
-        <div style={{ fontSize:24,fontWeight:900,color:th.textPrimary,fontFamily:"'Playfair Display',serif",marginBottom:4 }}>🗺️ Mapa — Pelotas</div>
-        <div style={{ fontSize:12,color:th.textSec,fontWeight:600 }}>{PLACES.length} estabelecimentos · <span style={{ color:th.green }}>{PLACES.filter(p=>p.open).length} abertos</span></div>
-      </div>
-      <button onClick={()=>goTo('https://www.google.com/maps/search/bares+restaurantes+Pelotas+RS')}
-        style={{ width:'100%',background:'linear-gradient(135deg,#1565C0,#1976D2)',border:'none',borderRadius:14,padding:'14px',color:'#fff',fontWeight:800,fontSize:14,cursor:'pointer',marginBottom:18,display:'flex',alignItems:'center',justifyContent:'center',gap:10,boxSizing:'border-box',boxShadow:'0 4px 16px rgba(21,101,192,.3)' }}>
-        🗺️ Abrir no Google Maps
-      </button>
-      {nbhs.map(nbh => (
-        <div key={nbh} style={{ marginBottom:18 }}>
-          <div style={{ fontSize:10,color:th.textMuted,letterSpacing:2,marginBottom:8,display:'flex',alignItems:'center',gap:8,fontWeight:700 }}>
-            <div style={{ flex:1,height:1,background:th.border }}/>📍 {nbh.toUpperCase()}<div style={{ flex:1,height:1,background:th.border }}/>
+    <div style={{ display:'flex', flexDirection:'column', height:'calc(100vh - 68px)' }}>
+      {/* Header fixo */}
+      <div style={{
+        background: th.headerBg, borderBottom:`1.5px solid ${th.border}`,
+        padding:'11px 16px', backdropFilter:'blur(12px)',
+        display:'flex', alignItems:'center', justifyContent:'space-between', flexShrink:0,
+      }}>
+        <div>
+          <div style={{ fontSize:20,fontWeight:900,color:th.textPrimary,fontFamily:"'Playfair Display',serif",lineHeight:1 }}>🗺️ Mapa</div>
+          <div style={{ fontSize:11,color:th.textSec,fontWeight:600,marginTop:2 }}>
+            Pelotas · <span style={{ color:th.green }}>{openCount} abertos agora</span>
           </div>
-          {PLACES.filter(p=>p.nbh===nbh).map(p => (
-            <div key={p.id} style={{ background:th.bgCard,border:`1.5px solid ${th.border}`,borderRadius:14,padding:'12px 14px',display:'flex',alignItems:'center',gap:12,marginBottom:8,boxShadow:th.shadow }}>
-              <div style={{ width:44,height:44,borderRadius:11,background:p.color+'15',border:`2px solid ${p.color}40`,display:'flex',alignItems:'center',justifyContent:'center',fontSize:20,flexShrink:0 }}>{p.emoji}</div>
-              <div style={{ flex:1,minWidth:0 }}>
-                <div style={{ fontSize:14,fontWeight:800,color:th.textPrimary }}>{p.name}</div>
-                <div style={{ fontSize:11,color:th.textSec,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap' }}>{p.addr}</div>
+        </div>
+        <div style={{ display:'flex', gap:8 }}>
+          <button onClick={() => setShowList(v => !v)} style={{
+            background: showList ? th.accent : th.bgCard,
+            border:`1.5px solid ${showList ? th.accent : th.border}`,
+            borderRadius:20, padding:'6px 14px', cursor:'pointer',
+            fontSize:12, fontWeight:700, color: showList ? '#fff' : th.textSec,
+            transition:'all .15s',
+          }}>
+            {showList ? '🗺️ Mapa' : '☰ Lista'}
+          </button>
+        </div>
+      </div>
+
+      {/* Conteúdo: Mapa ou Lista */}
+      <div style={{ flex:1, position:'relative', overflow:'hidden' }}>
+        {showList ? (
+          /* Modo lista (fallback / acessibilidade) */
+          <div style={{ height:'100%', overflowY:'auto', padding:16 }}>
+            {[...new Set(PLACES.map(p=>p.nbh))].sort().map(nbh => (
+              <div key={nbh} style={{ marginBottom:18 }}>
+                <div style={{ fontSize:10,color:th.textMuted,letterSpacing:2,marginBottom:8,display:'flex',alignItems:'center',gap:8,fontWeight:700 }}>
+                  <div style={{ flex:1,height:1,background:th.border }}/>
+                  📍 {nbh.toUpperCase()}
+                  <div style={{ flex:1,height:1,background:th.border }}/>
+                </div>
+                {PLACES.filter(p=>p.nbh===nbh).map(p => (
+                  <div key={p.id} onClick={() => onOpen(p)} style={{ background:th.bgCard,border:`1.5px solid ${th.border}`,borderRadius:14,padding:'12px 14px',display:'flex',alignItems:'center',gap:12,marginBottom:8,boxShadow:th.shadow,cursor:'pointer' }}>
+                    <div style={{ width:44,height:44,borderRadius:11,background:p.color+'15',border:`2px solid ${p.color}40`,display:'flex',alignItems:'center',justifyContent:'center',fontSize:20,flexShrink:0 }}>{p.emoji}</div>
+                    <div style={{ flex:1,minWidth:0 }}>
+                      <div style={{ fontSize:14,fontWeight:800,color:th.textPrimary }}>{p.name}</div>
+                      <div style={{ fontSize:11,color:th.textSec,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap' }}>{p.addr}</div>
+                    </div>
+                    <div style={{ display:'flex',flexDirection:'column',alignItems:'flex-end',gap:5,flexShrink:0 }}>
+                      <span style={{ fontSize:9,fontWeight:800,color:p.open?th.green:th.textMuted,letterSpacing:.5 }}>{p.open?'● ABERTO':'● FECHADO'}</span>
+                      <span style={{ fontSize:11,color:th.accent,fontWeight:700 }}>Ver →</span>
+                    </div>
+                  </div>
+                ))}
               </div>
-              <div style={{ display:'flex',flexDirection:'column',alignItems:'flex-end',gap:6,flexShrink:0 }}>
-                <span style={{ fontSize:9,fontWeight:800,color:p.open?th.green:th.textMuted,letterSpacing:.5 }}>{p.open?'● ABERTO':'● FECHADO'}</span>
-                <button onClick={()=>goTo(mUrl(p.addr,'Pelotas'))} style={{ background:p.color,border:'none',borderRadius:8,padding:'5px 12px',color:'#fff',fontSize:11,fontWeight:800,cursor:'pointer' }}>Ir →</button>
+            ))}
+          </div>
+        ) : (
+          /* Mapa Leaflet + carrossel inferior */
+          <>
+            <MapView places={PLACES} selected={mapSelected} onSelect={p => { setMapSelected(p); onOpen(p) }} mode={mode} />
+
+            {/* Carrossel de mini-cards sobre o mapa */}
+            <div style={{ position:'absolute', bottom:0, left:0, right:0, padding:'0 12px 14px', zIndex:500, pointerEvents:'none' }}>
+              <div style={{ display:'flex', gap:10, overflowX:'auto', paddingBottom:2, pointerEvents:'all' }}
+                   className="no-scrollbar">
+                {PLACES.map(p => (
+                  <div key={p.id}
+                    onClick={() => { setMapSelected(p); onOpen(p) }}
+                    style={{
+                      flex:'0 0 auto', width:160,
+                      background: mode === 'dark' ? 'rgba(12,12,12,.96)' : 'rgba(255,255,255,.97)',
+                      border:`2px solid ${mapSelected?.id === p.id ? p.color : (mode === 'dark' ? '#222' : '#EEE0D0')}`,
+                      borderRadius:16, overflow:'hidden', cursor:'pointer',
+                      boxShadow: mapSelected?.id === p.id
+                        ? `0 4px 20px ${p.color}55`
+                        : '0 4px 16px rgba(0,0,0,.18)',
+                      transform: mapSelected?.id === p.id ? 'translateY(-4px)' : 'none',
+                      transition:'all .2s',
+                    }}>
+                    {p.photos[0] && (
+                      <img src={p.photos[0].url} alt={p.name}
+                        style={{ width:'100%', height:72, objectFit:'cover', display:'block' }}/>
+                    )}
+                    <div style={{ padding:'8px 10px 10px' }}>
+                      <div style={{ display:'flex', alignItems:'center', gap:5, marginBottom:3 }}>
+                        <span style={{ width:6,height:6,borderRadius:'50%',background:p.open?th.green:th.textMuted,flexShrink:0 }}/>
+                        <span style={{ fontSize:9,fontWeight:800,color:p.open?th.green:th.textMuted,letterSpacing:.5 }}>
+                          {p.open ? 'ABERTO' : 'FECHADO'}
+                        </span>
+                      </div>
+                      <div style={{ fontSize:12,fontWeight:900,color:mode==='dark'?'#fff':'#1A0F00',lineHeight:1.2,marginBottom:2 }}>
+                        {p.emoji} {p.name.length > 16 ? p.name.slice(0,16)+'…' : p.name}
+                      </div>
+                      <div style={{ fontSize:10,color:mode==='dark'?'#888':'#7A6050',marginBottom:4 }}>{p.nbh}</div>
+                      <div style={{ fontSize:11,color:'#E67C00',fontWeight:700 }}>
+                        ★ {p.rating.toFixed(1)}
+                        {p.hours && <span style={{ color:p.color,marginLeft:6,fontWeight:600 }}>· {p.hours.split('–')[0]}</span>}
+                      </div>
+                    </div>
+                  </div>
+                ))}
               </div>
             </div>
-          ))}
-        </div>
-      ))}
+          </>
+        )}
+      </div>
     </div>
   )
 }
@@ -678,7 +931,7 @@ export default function App() {
         {toast&&<Toast msg={toast.msg} type={toast.type} mode={mode}/>}
 
         {screen==='home'       &&<HomeScreen    favs={favs} onFav={toggleFav} onOpen={setSel} th={th} themeBtn={ThemeBtn}/>}
-        {screen==='map'        &&<MapScreen     th={th}/>}
+        {screen==='map'        &&<MapScreen     th={th} mode={mode} onOpen={setSel}/>}
         {screen==='saved'      &&<SavedScreen   favs={favs} onFav={toggleFav} onOpen={setSel} th={th}/>}
         {screen==='profile'    &&<ProfileScreen onAdmin={()=>setScreen('admin_login')} showMsg={showMsg} th={th} user={user} onLogin={()=>setShowAuth(true)} onLogout={()=>{signOut();showMsg('Saiu!','info')}}/>}
         {screen==='admin_login'&&<AdminLogin    onEnter={e=>{setAdmin(e);setScreen('admin_panel')}} onBack={()=>setScreen('profile')} th={th}/>}

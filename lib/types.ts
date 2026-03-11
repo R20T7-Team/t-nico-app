@@ -14,6 +14,8 @@ export interface Place {
   hl: string
   desc: string
   addr: string
+  lat: number
+  lng: number
   rating: number
   reviews: number
   hasDU: boolean
